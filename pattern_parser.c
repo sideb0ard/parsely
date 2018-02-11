@@ -42,6 +42,14 @@ static void print_pattern_tokens(pattern_token tokens[MAX_PATTERN], int len)
             printf("<%s>", tokens[i].value);
         else
             printf("%s", token_type_names[tokens[i].type]);
+
+        if (tokens[i].has_divider)
+            printf("(/%d)", tokens[i].divider);
+        else if (tokens[i].has_multiplier)
+            printf("(*%d)", tokens[i].multiplier);
+        else if (tokens[i].has_euclid)
+            printf("(%d,%d)", tokens[i].euclid_hits, tokens[i].euclid_steps);
+
         if (i < (len - 1))
             printf(" ");
         else
