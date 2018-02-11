@@ -16,6 +16,7 @@ enum pattern_token_type
     CURLY_BRACKET_RIGHT,
     ANGLE_BRACKET_LEFT,
     ANGLE_BRACKET_RIGHT,
+    ANGLE_EXPRESSION,
     BLANK,
     VAR_NAME
 } pattern_token_type;

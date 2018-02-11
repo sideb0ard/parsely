@@ -14,9 +14,15 @@
 // algo inspired from
 // https://www.geeksforgeeks.org/check-for-balanced-parentheses-in-an-expression/
 
-static char *token_type_names[] = {"SQUARE_LEFT", "SQUARE_RIGHT", "CURLY_LEFT",
-                                   "CURLY_RIGHT", "ANGLE_LEFT",   "ANGLE_RIGHT",
-                                   "BLANK",       "VAR_NAME"};
+static char *token_type_names[] = {"SQUARE_LEFT",
+                                   "SQUARE_RIGHT",
+                                   "CURLY_LEFT",
+                                   "CURLY_RIGHT",
+                                   "ANGLE_BRACKET_LEFT",
+                                   "ANGLE_BRACKET_RIGHT",
+                                   "ANGLE_EXPRESSION",
+                                   "BLANK",
+                                   "VAR_NAME"};
 
 static bool is_in_array(int num_to_look_for, int *nums, int nums_len)
 {
@@ -32,6 +38,8 @@ static void print_pattern_tokens(pattern_token tokens[MAX_PATTERN], int len)
     {
         if (tokens[i].type == VAR_NAME)
             printf("%s", tokens[i].value);
+        else if (tokens[i].type == ANGLE_EXPRESSION)
+            printf("<%s>", tokens[i].value);
         else
             printf("%s", token_type_names[tokens[i].type]);
         if (i < (len - 1))
@@ -155,7 +163,6 @@ static bool isvalidtokenchar(char c)
 
 static bool is_start_of_modifier(char *c)
 {
-    printf("Is %c the same as \n", *c);
     if (*c && (*c == '(' || *c == '*' || *c == '/'))
         return true;
     return false;
@@ -165,10 +172,10 @@ static void extract_mod(char *mod, pattern_token *token) {}
 
 static int parse_expander(char *wurd, pattern_token *token)
 {
-    // looks for multiplier e.g. bd*2 or [bd bd]*3
+    // looks for multiplier or divisor e.g. bd*2 or [bd bd]/3
     regmatch_t asterisk_group[4];
     regex_t asterisk_rgx;
-    //regcomp(&asterisk_rgx, "([][:alnum:]]+)([\\*/]([[:digit:]]+)",
+    // regcomp(&asterisk_rgx, "([][:alnum:]]+)([\\*/]([[:digit:]]+)",
     regcomp(&asterisk_rgx, "([][:alnum:]]+)([\\*/])([[:digit:]]+)",
             REG_EXTENDED | REG_ICASE);
 
@@ -198,8 +205,7 @@ static int parse_expander(char *wurd, pattern_token *token)
         strncpy(var_mod, wurd + asterisk_group[3].rm_so, multi_len);
         int modifier = atoi(var_mod);
 
-        printf("Found an expansion! %s should be %s by %d\n", var_name,
-                var_op,
+        printf("Found an expansion! %s should be %s by %d\n", var_name, var_op,
                modifier);
 
         if (var_op[0] == '*')
@@ -214,7 +220,7 @@ static int parse_expander(char *wurd, pattern_token *token)
         }
         strncpy(token->value, var_name, 99);
 
-        num_to_increment_by = var_name_len+multi_len;
+        num_to_increment_by = var_name_len + multi_len;
     }
     else if (regexec(&euclid_rgx, wurd, 4, euclid_group, 0) == 0)
     {
@@ -244,7 +250,8 @@ static int parse_expander(char *wurd, pattern_token *token)
         token->euclid_steps = estep;
         strncpy(token->value, var_name, 99);
 
-        num_to_increment_by = var_name_len+euclid_hit_len+ euclid_step_len;;
+        num_to_increment_by = var_name_len + euclid_hit_len + euclid_step_len;
+        ;
     }
 
     regfree(&asterisk_rgx);
@@ -259,9 +266,6 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
     char *c = line;
     while (*c)
     {
-        char var_name[100] = {0};
-        int var_name_idx = 0;
-
         if (*c == ' ')
         {
             c++;
@@ -278,7 +282,7 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
             tokens[*token_idx].type = SQUARE_BRACKET_RIGHT;
             if (is_start_of_modifier(c + 1))
             {
-                printf("GOTS A MOD!\n");
+                printf("RIGHT GOTS A MOD!\n");
                 int inc = parse_expander(c, &tokens[*token_idx]);
                 c += inc;
             }
@@ -306,15 +310,23 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         }
         else if (*c == '<')
         {
-            printf("ANGLE LEFT!\n");
-            tokens[(*token_idx)++].type = ANGLE_BRACKET_LEFT;
-            c++;
-        }
-        else if (*c == '>')
-        {
-            printf("ANGLE RIGHT!\n");
-            tokens[(*token_idx)++].type = ANGLE_BRACKET_RIGHT;
-            c++;
+            printf("ANGLE EXPRESSION!\n");
+            char angle_contents[100];
+            int ac_idx = 0;
+
+            c++; // skip the '<'
+
+            tokens[*token_idx].type = ANGLE_EXPRESSION;
+            while ((*c) != '>')
+            {
+                angle_contents[ac_idx++] = *c;
+                c++;
+            }
+            c++; // skip the '>'
+
+            printf("angle contents %s\n", angle_contents);
+            strncpy(tokens[*token_idx].value, angle_contents, 99);
+            (*token_idx)++;
         }
         else if ((*c == '_') || (*c == '-') || (*c == '~'))
         {
@@ -324,6 +336,8 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         }
         else
         {
+            char var_name[100] = {0};
+            int var_name_idx = 0;
             while (isvalidtokenchar(*c))
                 var_name[var_name_idx++] = *c++;
             tokens[(*token_idx)].type = VAR_NAME;
@@ -423,14 +437,18 @@ static bool _stack_pop(wee_stack *s, unsigned int *ret)
 bool is_valid_pattern(char *line)
 {
     // checks for char in valid chars and balanced parens
+
     wee_stack parens_stack = {0};
 
     char *c = line;
-    while (*c) // && isvalidpatchar(*c))
+    while (*c)
     {
         if (!isvalidpatchar(*c) && *c != ' ')
+        {
             printf("BARF! '%c'\n", *c);
-        if (*c == '[' || *c == '{' || *c == '<')
+            return false;
+        }
+        else if (*c == '[' || *c == '{' || *c == '<')
         {
             if (!_stack_push(&parens_stack, c))
                 return false;
