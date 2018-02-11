@@ -139,9 +139,118 @@ void parse_tokens_into_groups(pattern_token tokens[MAX_PATTERN], int num_tokens)
 
 static bool isvalidpatchar(char c)
 {
-    if (isalnum(c) || c == '/' || c == '*' || c == '(' || c == ')' || c == ',')
+    if (isalnum(c) || c == '/' || c == '*' || c == '[' || c == ']' ||
+        c == '(' || c == ')' || c == ',' || c == '<' || c == '>' || c == '{' ||
+        c == '}' || c == ' ')
         return true;
     return false;
+}
+static bool isvalidtokenchar(char c)
+{
+    if (isalnum(c) || c == '/' || c == '*' || c == '(' || c == ')' ||
+        c == ',' || c == '<' || c == '>' || c == '{' || c == '}')
+        return true;
+    return false;
+}
+
+static bool is_start_of_modifier(char *c)
+{
+    printf("Is %c the same as \n", *c);
+    if (*c && (*c == '(' || *c == '*' || *c == '/'))
+        return true;
+    return false;
+}
+
+static void extract_mod(char *mod, pattern_token *token) {}
+
+static int parse_expander(char *wurd, pattern_token *token)
+{
+    // looks for multiplier e.g. bd*2 or [bd bd]*3
+    regmatch_t asterisk_group[4];
+    regex_t asterisk_rgx;
+    //regcomp(&asterisk_rgx, "([][:alnum:]]+)([\\*/]([[:digit:]]+)",
+    regcomp(&asterisk_rgx, "([][:alnum:]]+)([\\*/])([[:digit:]]+)",
+            REG_EXTENDED | REG_ICASE);
+
+    // looks for euclidean/bjorklund expander e.g. bd(3,8)
+    regmatch_t euclid_group[4];
+    regex_t euclid_rgx;
+    regcomp(&euclid_rgx, "([[:alnum:]]+)\\(([[:digit:]]),([[:digit:]])\\)",
+            REG_EXTENDED | REG_ICASE);
+
+    int num_to_increment_by = 0;
+    if (regexec(&asterisk_rgx, wurd, 4, asterisk_group, 0) == 0)
+    {
+        int var_name_len = asterisk_group[1].rm_eo - asterisk_group[1].rm_so;
+        char var_name[var_name_len + 1];
+        var_name[var_name_len] = '\0';
+        strncpy(var_name, wurd + asterisk_group[1].rm_so, var_name_len);
+
+        int op_len = asterisk_group[2].rm_eo - asterisk_group[2].rm_so;
+        char var_op[op_len + 1];
+        var_op[op_len] = '\0';
+        strncpy(var_op, wurd + asterisk_group[2].rm_so, op_len);
+        printf("OP is %s\n", var_op);
+
+        int multi_len = asterisk_group[3].rm_eo - asterisk_group[3].rm_so;
+        char var_mod[multi_len + 1];
+        var_mod[multi_len] = '\0';
+        strncpy(var_mod, wurd + asterisk_group[3].rm_so, multi_len);
+        int modifier = atoi(var_mod);
+
+        printf("Found an expansion! %s should be %s by %d\n", var_name,
+                var_op,
+               modifier);
+
+        if (var_op[0] == '*')
+        {
+            token->has_multiplier = true;
+            token->multiplier = modifier;
+        }
+        else if (var_op[0] == '/')
+        {
+            token->has_divider = true;
+            token->divider = modifier;
+        }
+        strncpy(token->value, var_name, 99);
+
+        num_to_increment_by = var_name_len+multi_len;
+    }
+    else if (regexec(&euclid_rgx, wurd, 4, euclid_group, 0) == 0)
+    {
+        printf("BjORKLUND MATCH!\n");
+        int var_name_len = euclid_group[1].rm_eo - euclid_group[1].rm_so;
+        char var_name[var_name_len + 1];
+        var_name[var_name_len] = '\0';
+        strncpy(var_name, wurd + euclid_group[1].rm_so, var_name_len);
+
+        int euclid_hit_len = euclid_group[2].rm_eo - euclid_group[2].rm_so;
+        char euc_hit[euclid_hit_len + 1];
+        euc_hit[euclid_hit_len] = '\0';
+        strncpy(euc_hit, wurd + euclid_group[2].rm_so, euclid_hit_len);
+        int ehit = atoi(euc_hit);
+
+        int euclid_step_len = euclid_group[3].rm_eo - euclid_group[3].rm_so;
+        char euc_step[euclid_step_len + 1];
+        euc_step[euclid_step_len] = '\0';
+        strncpy(euc_step, wurd + euclid_group[3].rm_so, euclid_step_len);
+        int estep = atoi(euc_step);
+
+        printf("Found an Euclid!! %s should have %d hits over %d steps\n",
+               var_name, ehit, estep);
+
+        token->has_euclid = true;
+        token->euclid_hits = ehit;
+        token->euclid_steps = estep;
+        strncpy(token->value, var_name, 99);
+
+        num_to_increment_by = var_name_len+euclid_hit_len+ euclid_step_len;;
+    }
+
+    regfree(&asterisk_rgx);
+    regfree(&euclid_rgx);
+
+    return num_to_increment_by;
 }
 
 int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
@@ -166,7 +275,14 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         else if (*c == ']')
         {
             printf("SQ_RIGHTBRACKET!\n");
-            tokens[(*token_idx)++].type = SQUARE_BRACKET_RIGHT;
+            tokens[*token_idx].type = SQUARE_BRACKET_RIGHT;
+            if (is_start_of_modifier(c + 1))
+            {
+                printf("GOTS A MOD!\n");
+                int inc = parse_expander(c, &tokens[*token_idx]);
+                c += inc;
+            }
+            (*token_idx)++;
             c++;
         }
         else if (*c == '{')
@@ -179,6 +295,13 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         {
             printf("CURLY_RIGHT!\n");
             tokens[(*token_idx)++].type = CURLY_BRACKET_RIGHT;
+            if (is_start_of_modifier(c + 1))
+            {
+                printf("GOTS A MOD!\n");
+                int inc = parse_expander(c, &tokens[*token_idx]);
+                c += inc;
+            }
+
             c++;
         }
         else if (*c == '<')
@@ -201,11 +324,12 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         }
         else
         {
-            while (isvalidpatchar(*c))
+            while (isvalidtokenchar(*c))
                 var_name[var_name_idx++] = *c++;
-            printf("VAR! %s\n", var_name);
             tokens[(*token_idx)].type = VAR_NAME;
             strncpy(tokens[*token_idx].value, var_name, MAX_PATTERN_CHAR_VAL);
+            parse_expander(var_name, &tokens[*token_idx]);
+            printf("VAR! %s\n", var_name);
             (*token_idx)++;
         }
     }
@@ -296,13 +420,16 @@ static bool _stack_pop(wee_stack *s, unsigned int *ret)
     return false;
 }
 
-bool pattern_parens_is_balanced(char *line)
+bool is_valid_pattern(char *line)
 {
+    // checks for char in valid chars and balanced parens
     wee_stack parens_stack = {0};
 
     char *c = line;
-    while (*c)
+    while (*c) // && isvalidpatchar(*c))
     {
+        if (!isvalidpatchar(*c) && *c != ' ')
+            printf("BARF! '%c'\n", *c);
         if (*c == '[' || *c == '{' || *c == '<')
         {
             if (!_stack_push(&parens_stack, c))
@@ -326,81 +453,6 @@ bool pattern_parens_is_balanced(char *line)
     return false;
 }
 
-static void parse_density_expansions(pattern_token tokens[MAX_PATTERN], int len)
-{
-    regmatch_t asterisk_group[3];
-    regex_t asterisk_rgx;
-    regcomp(&asterisk_rgx, "([[:alnum:]]+)\\*([[:digit:]]+)",
-            REG_EXTENDED | REG_ICASE); // e.g. bd*2
-
-    regmatch_t euclid_group[4];
-    regex_t euclid_rgx;
-    regcomp(&euclid_rgx, "([[:alnum:]]+)\\(([[:digit:]]),([[:digit:]])\\)",
-            REG_EXTENDED | REG_ICASE); // e.g. bd(3,8)
-
-    pattern_token expanded_tokens[MAX_PATTERN];
-    int expanded_idx = 0;
-    for (int i = 0; i < len; i++)
-    {
-        if (tokens[i].type == VAR_NAME)
-        {
-            char *toke_val = tokens[i].value;
-            if (regexec(&asterisk_rgx, toke_val, 3, asterisk_group, 0) == 0)
-            {
-                int var_name_len =
-                    asterisk_group[1].rm_eo - asterisk_group[1].rm_so;
-                char var_name[var_name_len + 1];
-                var_name[var_name_len] = '\0';
-                strncpy(var_name, toke_val + asterisk_group[1].rm_so,
-                        var_name_len);
-
-                int multi_len =
-                    asterisk_group[2].rm_eo - asterisk_group[2].rm_so;
-                char var_mod[multi_len + 1];
-                var_mod[multi_len] = '\0';
-                strncpy(var_mod, toke_val + asterisk_group[2].rm_so, multi_len);
-                int modifier = atoi(var_mod);
-
-                printf("Found an expansion! %s should be * by %d\n", var_name,
-                       modifier);
-            }
-            else if (regexec(&euclid_rgx, toke_val, 4, euclid_group, 0) == 0)
-            {
-                printf("BjORKLUND MATCH!\n");
-                int var_name_len =
-                    euclid_group[1].rm_eo - euclid_group[1].rm_so;
-                char var_name[var_name_len + 1];
-                var_name[var_name_len] = '\0';
-                strncpy(var_name, toke_val + euclid_group[1].rm_so,
-                        var_name_len);
-
-                int euclid_hit_len =
-                    euclid_group[2].rm_eo - euclid_group[2].rm_so;
-                char euc_hit[euclid_hit_len + 1];
-                euc_hit[euclid_hit_len] = '\0';
-                strncpy(euc_hit, toke_val + euclid_group[2].rm_so,
-                        euclid_hit_len);
-                int ehit = atoi(euc_hit);
-
-                int euclid_step_len =
-                    euclid_group[3].rm_eo - euclid_group[3].rm_so;
-                char euc_step[euclid_step_len + 1];
-                euc_step[euclid_step_len] = '\0';
-                strncpy(euc_step, toke_val + euclid_group[3].rm_so,
-                        euclid_step_len);
-                int estep = atoi(euc_step);
-
-                printf(
-                    "Found an Euclid!! %s should have %d hits over %d steps\n",
-                    var_name, ehit, estep);
-            }
-        }
-    }
-
-    regfree(&asterisk_rgx);
-    regfree(&euclid_rgx);
-}
-
 static void parse_cycle_expansions(pattern_token tokens[MAX_PATTERN], int len)
 {
     for (int i = 0; i < len; i++)
@@ -418,7 +470,7 @@ static void parse_cycle_expansions(pattern_token tokens[MAX_PATTERN], int len)
 
 bool parse_pattern(char *line)
 {
-    if (!pattern_parens_is_balanced(line))
+    if (!is_valid_pattern(line))
     {
         printf("Belched on yer pattern, mate. it was stinky\n");
         return false;
@@ -430,9 +482,6 @@ bool parse_pattern(char *line)
     extract_tokens_from_line(tokens, &token_idx, line);
     printf("I got %d tokens\n", token_idx);
     print_pattern_tokens(tokens, token_idx);
-
-    parse_density_expansions(tokens, token_idx); // euclid (x,y) and '*'
-    parse_cycle_expansions(tokens, token_idx);   // <pat1 pat2> and '/'
 
     // parse_tokens_into_groups(tokens, token_idx);
 

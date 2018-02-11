@@ -25,6 +25,13 @@ typedef struct pattern_token
     unsigned int type;
     char value[MAX_PATTERN_CHAR_VAL];
     int idx;
+    bool has_multiplier;
+    int multiplier;
+    bool has_divider;
+    int divider;
+    bool has_euclid;
+    int euclid_hits;
+    int euclid_steps;
 } pattern_token;
 
 typedef struct pg_child
@@ -41,7 +48,7 @@ typedef struct pattern_group
 } pattern_group;
 
 bool parse_pattern(char *line);
-bool pattern_parens_is_balanced(char *line);
+bool is_valid_pattern(char *line);
 void work_out_positions(pattern_group pgroups[MAX_PATTERN], int level,
                         int start_idx, int pattern_len,
                         int ppositions[MAX_PATTERN], int *numpositions);

@@ -17,7 +17,7 @@ int main(int argc, char **argv)
     (void)argv;
 
     puts("Parsy Version 0.0.0.0.1");
-    puts("Press Ctrl+c to Exit\n");
+    puts("Press Ctrl+D to Exit\n");
 
     char *line;
     while ((line = readline("parsy> ")) != NULL)
