@@ -1,6 +1,8 @@
 #include <ctype.h>
+#include <regex.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "pattern_parser.h"
@@ -137,12 +139,7 @@ void parse_tokens_into_groups(pattern_token tokens[MAX_PATTERN], int num_tokens)
 
 static bool isvalidpatchar(char c)
 {
-    if (isalnum(c)
-        || c == '/'
-        || c == '*'
-        || c == '('
-        || c == ')'
-        || c == ',')
+    if (isalnum(c) || c == '/' || c == '*' || c == '(' || c == ')' || c == ',')
         return true;
     return false;
 }
@@ -254,13 +251,13 @@ static bool matchy_matchy(unsigned int left, char *right)
     return false;
 }
 
-typedef struct stack_t
+typedef struct wee_stack
 {
     unsigned int stack[_STACK_SIZE];
     int idx;
-} stack_t;
+} wee_stack;
 
-static bool _stack_push(stack_t *s, char *c)
+static bool _stack_push(wee_stack *s, char *c)
 {
     if (s->idx < _STACK_SIZE)
     {
@@ -286,7 +283,7 @@ static bool _stack_push(stack_t *s, char *c)
     return false;
 }
 
-static bool _stack_pop(stack_t *s, unsigned int *ret)
+static bool _stack_pop(wee_stack *s, unsigned int *ret)
 {
     if (s->idx > 0)
     {
@@ -301,7 +298,7 @@ static bool _stack_pop(stack_t *s, unsigned int *ret)
 
 bool pattern_parens_is_balanced(char *line)
 {
-    stack_t parens_stack = {0};
+    wee_stack parens_stack = {0};
 
     char *c = line;
     while (*c)
@@ -329,6 +326,96 @@ bool pattern_parens_is_balanced(char *line)
     return false;
 }
 
+static void parse_density_expansions(pattern_token tokens[MAX_PATTERN], int len)
+{
+    regmatch_t asterisk_group[3];
+    regex_t asterisk_rgx;
+    regcomp(&asterisk_rgx, "([[:alnum:]]+)\\*([[:digit:]]+)",
+            REG_EXTENDED | REG_ICASE); // e.g. bd*2
+
+    regmatch_t euclid_group[4];
+    regex_t euclid_rgx;
+    regcomp(&euclid_rgx, "([[:alnum:]]+)\\(([[:digit:]]),([[:digit:]])\\)",
+            REG_EXTENDED | REG_ICASE); // e.g. bd(3,8)
+
+    pattern_token expanded_tokens[MAX_PATTERN];
+    int expanded_idx = 0;
+    for (int i = 0; i < len; i++)
+    {
+        if (tokens[i].type == VAR_NAME)
+        {
+            char *toke_val = tokens[i].value;
+            if (regexec(&asterisk_rgx, toke_val, 3, asterisk_group, 0) == 0)
+            {
+                int var_name_len =
+                    asterisk_group[1].rm_eo - asterisk_group[1].rm_so;
+                char var_name[var_name_len + 1];
+                var_name[var_name_len] = '\0';
+                strncpy(var_name, toke_val + asterisk_group[1].rm_so,
+                        var_name_len);
+
+                int multi_len =
+                    asterisk_group[2].rm_eo - asterisk_group[2].rm_so;
+                char var_mod[multi_len + 1];
+                var_mod[multi_len] = '\0';
+                strncpy(var_mod, toke_val + asterisk_group[2].rm_so, multi_len);
+                int modifier = atoi(var_mod);
+
+                printf("Found an expansion! %s should be * by %d\n", var_name,
+                       modifier);
+            }
+            else if (regexec(&euclid_rgx, toke_val, 4, euclid_group, 0) == 0)
+            {
+                printf("BjORKLUND MATCH!\n");
+                int var_name_len =
+                    euclid_group[1].rm_eo - euclid_group[1].rm_so;
+                char var_name[var_name_len + 1];
+                var_name[var_name_len] = '\0';
+                strncpy(var_name, toke_val + euclid_group[1].rm_so,
+                        var_name_len);
+
+                int euclid_hit_len =
+                    euclid_group[2].rm_eo - euclid_group[2].rm_so;
+                char euc_hit[euclid_hit_len + 1];
+                euc_hit[euclid_hit_len] = '\0';
+                strncpy(euc_hit, toke_val + euclid_group[2].rm_so,
+                        euclid_hit_len);
+                int ehit = atoi(euc_hit);
+
+                int euclid_step_len =
+                    euclid_group[3].rm_eo - euclid_group[3].rm_so;
+                char euc_step[euclid_step_len + 1];
+                euc_step[euclid_step_len] = '\0';
+                strncpy(euc_step, toke_val + euclid_group[3].rm_so,
+                        euclid_step_len);
+                int estep = atoi(euc_step);
+
+                printf(
+                    "Found an Euclid!! %s should have %d hits over %d steps\n",
+                    var_name, ehit, estep);
+            }
+        }
+    }
+
+    regfree(&asterisk_rgx);
+    regfree(&euclid_rgx);
+}
+
+static void parse_cycle_expansions(pattern_token tokens[MAX_PATTERN], int len)
+{
+    for (int i = 0; i < len; i++)
+    {
+        // if (tokens[i].type == VAR_NAME)
+        //    printf("%s", tokens[i].value);
+        // else
+        //    printf("%s", token_type_names[tokens[i].type]);
+        // if (i < (len - 1))
+        //    printf(" ");
+        // else
+        //    printf("\n");
+    }
+}
+
 bool parse_pattern(char *line)
 {
     if (!pattern_parens_is_balanced(line))
@@ -337,7 +424,6 @@ bool parse_pattern(char *line)
         return false;
     }
 
-
     pattern_token tokens[MAX_PATTERN] = {0};
     int token_idx = 0;
 
@@ -345,8 +431,10 @@ bool parse_pattern(char *line)
     printf("I got %d tokens\n", token_idx);
     print_pattern_tokens(tokens, token_idx);
 
-    //parse_tokens_into_groups(tokens, token_idx);
+    parse_density_expansions(tokens, token_idx); // euclid (x,y) and '*'
+    parse_cycle_expansions(tokens, token_idx);   // <pat1 pat2> and '/'
+
+    // parse_tokens_into_groups(tokens, token_idx);
 
     return true;
 }
-
