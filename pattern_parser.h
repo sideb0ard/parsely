@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 
-#define MAX_PATTERN 64
+#define MAX_PATTERN 128
 #define MAX_PATTERN_CHAR_VAL 100
 #define MAX_CHILDREN 20
 
@@ -25,15 +25,19 @@ typedef struct pattern_token
 {
     unsigned int type;
     char value[MAX_PATTERN_CHAR_VAL];
-    int idx;
+    //int  idx;
+
     bool has_multiplier;
-    int multiplier;
+    int  multiplier;
+
     bool has_divider;
-    int divider;
+    int  divider;
+
     bool has_euclid;
-    int euclid_hits;
-    int euclid_steps;
-} pattern_token;
+    int  euclid_hits;
+    int  euclid_steps;
+}
+pattern_token;
 
 typedef struct pg_child
 {

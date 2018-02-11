@@ -1,5 +1,5 @@
 CC = clang++
-SRCS = cmdloop.c pattern_parser.c
+SRCS = cmdloop.c pattern_parser.c euclidean.c
 OBJS = $(subst .c,.o,$(SRCS))
 LIBS = -lreadline
 INCDIRS=-I/usr/local/include -Iinclude

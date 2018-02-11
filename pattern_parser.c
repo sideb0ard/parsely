@@ -5,14 +5,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "euclidean.h"
 #include "pattern_parser.h"
+
 #define PPQN 960         // Pulses Per Quarter Note // one beat
 #define PPBAR (PPQN * 4) // Pulses per loop/bar - i.e 4 * beats
 
-#define _STACK_SIZE 32
+#define WEE_STACK_SIZE 32
+#define _MAX_VAR_NAME 32
+#define _MAX_TOKENS 128
 
-// algo inspired from
+// algo originally inspired from
 // https://www.geeksforgeeks.org/check-for-balanced-parentheses-in-an-expression/
+
+typedef struct wee_stack
+{
+    unsigned int stack[WEE_STACK_SIZE];
+    int idx;
+} wee_stack;
 
 static char *token_type_names[] = {"SQUARE_LEFT",
                                    "SQUARE_RIGHT",
@@ -59,11 +69,11 @@ static void print_pattern_tokens(pattern_token tokens[MAX_PATTERN], int len)
 
 void parse_tokens_into_groups(pattern_token tokens[MAX_PATTERN], int num_tokens)
 {
-    pattern_group pgroups[MAX_PATTERN] = {0};
+    pattern_group pgroups[MAX_PATTERN] = {};
     int current_pattern_group = 0;
     int num_pattern_groups = 0;
 
-    pattern_token var_tokens[100] = {0};
+    pattern_token var_tokens[_MAX_TOKENS] = {};
     int var_tokens_idx = 0;
 
     for (int i = 0; i < num_tokens; i++)
@@ -91,27 +101,29 @@ void parse_tokens_into_groups(pattern_token tokens[MAX_PATTERN], int num_tokens)
         printf("Group %d - parent is %d contains %d members\n", i,
                pgroups[i].parent, pgroups[i].num_children);
 
-    int level = 0;
-    int start_idx = 0;
-    int pattern_len = PPBAR;
-    int ppositions[MAX_PATTERN] = {0};
-    int numpositions = 0;
-    work_out_positions(pgroups, level, start_idx, pattern_len, ppositions,
-                       &numpositions);
+    print_pattern_tokens(var_tokens, var_tokens_idx);
 
-    int num_uniq = 0;
-    int uniq_positions[MAX_PATTERN] = {0};
-    for (int i = 0; i < numpositions; i++)
-        if (!is_in_array(ppositions[i], uniq_positions, num_uniq))
-            uniq_positions[num_uniq++] = ppositions[i];
+    // int level = 0;
+    // int start_idx = 0;
+    // int pattern_len = PPBAR;
+    // int ppositions[MAX_PATTERN] = {0};
+    // int numpositions = 0;
+    // work_out_positions(pgroups, level, start_idx, pattern_len, ppositions,
+    //                   &numpositions);
 
-    if (num_uniq != var_tokens_idx)
-    {
-        printf("Vars and timings don't match, ya numpty: num_uniq:%d "
-               "var_tokens:%d\n",
-               num_uniq, var_tokens_idx);
-        return;
-    }
+    // int num_uniq = 0;
+    // int uniq_positions[MAX_PATTERN] = {};
+    // for (int i = 0; i < numpositions; i++)
+    //    if (!is_in_array(ppositions[i], uniq_positions, num_uniq))
+    //        uniq_positions[num_uniq++] = ppositions[i];
+
+    // if (num_uniq != var_tokens_idx)
+    //{
+    //    printf("Vars and timings don't match, ya numpty: num_uniq:%d "
+    //           "var_tokens:%d\n",
+    //           num_uniq, var_tokens_idx);
+    //    return;
+    //}
 
     //// 3. verify env vars
     // for (int i = 0; i < var_tokens_idx; i++)
@@ -153,22 +165,21 @@ void parse_tokens_into_groups(pattern_token tokens[MAX_PATTERN], int num_tokens)
     //}
 }
 
-static bool isvalidpatchar(char c)
-{
-    if (isalnum(c) || c == '/' || c == '*' || c == '[' || c == ']' ||
-        c == '(' || c == ')' || c == ',' || c == '<' || c == '>' || c == '{' ||
-        c == '}' || c == ' ')
-        return true;
-    return false;
-}
-static bool isvalidtokenchar(char c)
+static bool is_valid_token_char(char c)
 {
     if (isalnum(c) || c == '/' || c == '*' || c == '(' || c == ')' ||
-        c == ',' || c == '<' || c == '>' || c == '{' || c == '}')
+        c == ',' || c == '<' || c == '>' || c == '{' || c == '}' || c == '~' ||
+        c == '_' || c == '-')
         return true;
     return false;
 }
 
+static bool is_valid_pattern_char(char c)
+{
+    if (is_valid_token_char(c) || c == '[' || c == ']' || c == ',' || c == ' ')
+        return true;
+    return false;
+}
 static bool is_start_of_modifier(char *c)
 {
     if (*c && (*c == '(' || *c == '*' || *c == '/'))
@@ -176,24 +187,34 @@ static bool is_start_of_modifier(char *c)
     return false;
 }
 
-static void extract_mod(char *mod, pattern_token *token) {}
+static bool is_valid_token_name(char *token_name)
+{
+    // pretty weak, just checks if starts with alnum
+    // followed by optional expander
+    regex_t valid_token_rx;
+    regcomp(&valid_token_rx, "^[[:alnum:]]+[\\*/(]?", REG_EXTENDED | REG_ICASE);
+    bool ret = false;
+    if (regexec(&valid_token_rx, token_name, 0, NULL, 0) == 0)
+        ret = true;
+    regfree(&valid_token_rx);
 
-static int parse_expander(char *wurd, pattern_token *token)
+    return ret;
+}
+static int grep_expander(char *wurd, pattern_token *token)
 {
     // looks for multiplier or divisor e.g. bd*2 or [bd bd]/3
     regmatch_t asterisk_group[4];
     regex_t asterisk_rgx;
-    // regcomp(&asterisk_rgx, "([][:alnum:]]+)([\\*/]([[:digit:]]+)",
     regcomp(&asterisk_rgx, "([][:alnum:]]+)([\\*/])([[:digit:]]+)",
             REG_EXTENDED | REG_ICASE);
 
     // looks for euclidean/bjorklund expander e.g. bd(3,8)
     regmatch_t euclid_group[4];
     regex_t euclid_rgx;
-    regcomp(&euclid_rgx, "([[:alnum:]]+)\\(([[:digit:]]),([[:digit:]])\\)",
+    regcomp(&euclid_rgx, "([][:alnum:]]+)\\(([[:digit:]]+),([[:digit:]]+)\\)",
             REG_EXTENDED | REG_ICASE);
 
-    int num_to_increment_by = 0;
+    int num_to_increment_by = 0; // return value, used to increment string
     if (regexec(&asterisk_rgx, wurd, 4, asterisk_group, 0) == 0)
     {
         int var_name_len = asterisk_group[1].rm_eo - asterisk_group[1].rm_so;
@@ -205,16 +226,12 @@ static int parse_expander(char *wurd, pattern_token *token)
         char var_op[op_len + 1];
         var_op[op_len] = '\0';
         strncpy(var_op, wurd + asterisk_group[2].rm_so, op_len);
-        printf("OP is %s\n", var_op);
 
         int multi_len = asterisk_group[3].rm_eo - asterisk_group[3].rm_so;
         char var_mod[multi_len + 1];
         var_mod[multi_len] = '\0';
         strncpy(var_mod, wurd + asterisk_group[3].rm_so, multi_len);
         int modifier = atoi(var_mod);
-
-        printf("Found an expansion! %s should be %s by %d\n", var_name, var_op,
-               modifier);
 
         if (var_op[0] == '*')
         {
@@ -226,13 +243,12 @@ static int parse_expander(char *wurd, pattern_token *token)
             token->has_divider = true;
             token->divider = modifier;
         }
-        strncpy(token->value, var_name, 99);
+        strncpy(token->value, var_name, MAX_PATTERN_CHAR_VAL - 1);
 
-        num_to_increment_by = var_name_len + multi_len;
+        num_to_increment_by = op_len + multi_len;
     }
     else if (regexec(&euclid_rgx, wurd, 4, euclid_group, 0) == 0)
     {
-        printf("BjORKLUND MATCH!\n");
         int var_name_len = euclid_group[1].rm_eo - euclid_group[1].rm_so;
         char var_name[var_name_len + 1];
         var_name[var_name_len] = '\0';
@@ -250,16 +266,13 @@ static int parse_expander(char *wurd, pattern_token *token)
         strncpy(euc_step, wurd + euclid_group[3].rm_so, euclid_step_len);
         int estep = atoi(euc_step);
 
-        printf("Found an Euclid!! %s should have %d hits over %d steps\n",
-               var_name, ehit, estep);
-
         token->has_euclid = true;
         token->euclid_hits = ehit;
         token->euclid_steps = estep;
-        strncpy(token->value, var_name, 99);
+        strncpy(token->value, var_name, MAX_PATTERN_CHAR_VAL - 1);
 
-        num_to_increment_by = var_name_len + euclid_hit_len + euclid_step_len;
-        ;
+        num_to_increment_by =
+            euclid_hit_len + euclid_step_len + 3; //'(', ',' and ')'
     }
 
     regfree(&asterisk_rgx);
@@ -280,18 +293,15 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         }
         else if (*c == '[')
         {
-            printf("SQ_LEFTBRACKET!\n");
             tokens[(*token_idx)++].type = SQUARE_BRACKET_LEFT;
             c++;
         }
         else if (*c == ']')
         {
-            printf("SQ_RIGHTBRACKET!\n");
             tokens[*token_idx].type = SQUARE_BRACKET_RIGHT;
             if (is_start_of_modifier(c + 1))
             {
-                printf("RIGHT GOTS A MOD!\n");
-                int inc = parse_expander(c, &tokens[*token_idx]);
+                int inc = grep_expander(c, &tokens[*token_idx]);
                 c += inc;
             }
             (*token_idx)++;
@@ -299,18 +309,15 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         }
         else if (*c == '{')
         {
-            printf("CURLY_LEFT!\n");
             tokens[(*token_idx)++].type = CURLY_BRACKET_LEFT;
             c++;
         }
         else if (*c == '}')
         {
-            printf("CURLY_RIGHT!\n");
             tokens[(*token_idx)++].type = CURLY_BRACKET_RIGHT;
             if (is_start_of_modifier(c + 1))
             {
-                printf("GOTS A MOD!\n");
-                int inc = parse_expander(c, &tokens[*token_idx]);
+                int inc = grep_expander(c, &tokens[*token_idx]);
                 c += inc;
             }
 
@@ -318,8 +325,7 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
         }
         else if (*c == '<')
         {
-            printf("ANGLE EXPRESSION!\n");
-            char angle_contents[100];
+            char angle_contents[MAX_PATTERN_CHAR_VAL];
             int ac_idx = 0;
 
             c++; // skip the '<'
@@ -332,27 +338,35 @@ int extract_tokens_from_line(pattern_token *tokens, int *token_idx, char *line)
             }
             c++; // skip the '>'
 
-            printf("angle contents %s\n", angle_contents);
-            strncpy(tokens[*token_idx].value, angle_contents, 99);
+            strncpy(tokens[*token_idx].value, angle_contents,
+                    MAX_PATTERN_CHAR_VAL - 1);
             (*token_idx)++;
         }
         else if ((*c == '_') || (*c == '-') || (*c == '~'))
         {
-            printf("BLANK!\n");
             tokens[(*token_idx)++].type = BLANK;
             c++;
         }
         else
         {
-            char var_name[100] = {0};
+            char var_name[_MAX_VAR_NAME] = {};
             int var_name_idx = 0;
-            while (isvalidtokenchar(*c))
+            while (is_valid_token_char(*c))
                 var_name[var_name_idx++] = *c++;
-            tokens[(*token_idx)].type = VAR_NAME;
-            strncpy(tokens[*token_idx].value, var_name, MAX_PATTERN_CHAR_VAL);
-            parse_expander(var_name, &tokens[*token_idx]);
-            printf("VAR! %s\n", var_name);
-            (*token_idx)++;
+            if (is_valid_token_name(var_name))
+            {
+                tokens[(*token_idx)].type = VAR_NAME;
+                strncpy(tokens[*token_idx].value, var_name,
+                        MAX_PATTERN_CHAR_VAL);
+                grep_expander(var_name, &tokens[*token_idx]);
+                (*token_idx)++;
+            }
+            else
+            {
+                printf("As far as i can tell, %s ain't no valid name, cuz\n",
+                       var_name);
+                return 1;
+            }
         }
     }
 
@@ -397,15 +411,9 @@ static bool matchy_matchy(unsigned int left, char *right)
     return false;
 }
 
-typedef struct wee_stack
+static bool wee_stack_push(wee_stack *s, char *c)
 {
-    unsigned int stack[_STACK_SIZE];
-    int idx;
-} wee_stack;
-
-static bool _stack_push(wee_stack *s, char *c)
-{
-    if (s->idx < _STACK_SIZE)
+    if (s->idx < WEE_STACK_SIZE)
     {
         unsigned int type = -1;
         switch (*c)
@@ -429,7 +437,7 @@ static bool _stack_push(wee_stack *s, char *c)
     return false;
 }
 
-static bool _stack_pop(wee_stack *s, unsigned int *ret)
+static bool wee_stack_pop(wee_stack *s, unsigned int *ret)
 {
     if (s->idx > 0)
     {
@@ -444,27 +452,28 @@ static bool _stack_pop(wee_stack *s, unsigned int *ret)
 
 bool is_valid_pattern(char *line)
 {
-    // checks for char in valid chars and balanced parens
+    // checks that chars are in valid chars,
+    // and that parens are balanced
 
-    wee_stack parens_stack = {0};
+    wee_stack parens_stack = {};
 
     char *c = line;
     while (*c)
     {
-        if (!isvalidpatchar(*c) && *c != ' ')
+        if (!is_valid_pattern_char(*c))
         {
-            printf("BARF! '%c'\n", *c);
+            printf("BARF! '%c' is not a valid pattern char\n", *c);
             return false;
         }
         else if (*c == '[' || *c == '{' || *c == '<')
         {
-            if (!_stack_push(&parens_stack, c))
+            if (!wee_stack_push(&parens_stack, c))
                 return false;
         }
         else if (*c == ']' || *c == '}' || *c == '>')
         {
             unsigned int matchy = 0;
-            if (!_stack_pop(&parens_stack, &matchy))
+            if (!wee_stack_pop(&parens_stack, &matchy))
                 return false;
 
             if (!matchy_matchy(matchy, c))
@@ -479,19 +488,94 @@ bool is_valid_pattern(char *line)
     return false;
 }
 
-static void parse_cycle_expansions(pattern_token tokens[MAX_PATTERN], int len)
+static void copy_pattern_token(pattern_token *to, pattern_token *from)
 {
+    to->type = from->type;
+    strncpy(to->value, from->value, MAX_PATTERN_CHAR_VAL - 1);
+}
+
+static void expand_the_expanders(pattern_token tokens[MAX_PATTERN], int len)
+{
+    pattern_token expanded_tokens[MAX_PATTERN] = {};
+    int expanded_token_idx = 0;
+
     for (int i = 0; i < len; i++)
     {
-        // if (tokens[i].type == VAR_NAME)
-        //    printf("%s", tokens[i].value);
-        // else
-        //    printf("%s", token_type_names[tokens[i].type]);
-        // if (i < (len - 1))
-        //    printf(" ");
-        // else
-        //    printf("\n");
+        if (tokens[i].type == VAR_NAME)
+        {
+            // printf("%s", tokens[i].value);
+            if (tokens[i].has_multiplier)
+            {
+                // printf("(*%d)", tokens[i].multiplier);
+                expanded_tokens[expanded_token_idx++].type =
+                    SQUARE_BRACKET_LEFT;
+                for (int j = 0; j < tokens[i].multiplier; j++)
+                    copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+                                       &tokens[i]);
+                expanded_tokens[expanded_token_idx++].type =
+                    SQUARE_BRACKET_RIGHT;
+            }
+            else if (tokens[i].has_euclid)
+            {
+                if (tokens[i].euclid_steps > 64)
+                {
+                    printf("Meh, ain't tested this beyond 64 steps - ignoring "
+                           "yer request\n");
+                    continue;
+                }
+
+                expanded_tokens[expanded_token_idx++].type =
+                    SQUARE_BRACKET_LEFT;
+
+                short euclid = create_euclidean_rhythm(tokens[i].euclid_hits,
+                                                       tokens[i].euclid_steps);
+                for (int j = 0; j < tokens[i].euclid_steps; j++)
+                {
+                    printf("%d in %d\n", expanded_token_idx, MAX_PATTERN);
+                    if (euclid & (1 << (15 - j)))
+                    {
+                        //printf("1");
+                        copy_pattern_token(
+                            &expanded_tokens[expanded_token_idx++], &tokens[i]);
+                    }
+                    else
+                    {
+                        //printf("0");
+                        expanded_tokens[expanded_token_idx++].type = BLANK;
+                    }
+                }
+                printf("\n");
+                expanded_tokens[expanded_token_idx++].type =
+                    SQUARE_BRACKET_RIGHT;
+                // printf("(%d,%d)", tokens[i].euclid_hits,
+                //       tokens[i].euclid_steps);
+            }
+            else
+                copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+                                   &tokens[i]);
+        }
+        else if (tokens[i].type == SQUARE_BRACKET_LEFT)
+        {
+            // printf("<%s>", tokens[i].value);
+            copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+                               &tokens[i]);
+        }
+        else
+        {
+            // printf("%s", token_type_names[tokens[i].type]);
+            copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+                               &tokens[i]);
+        }
+
+        // if (tokens[i].has_divider)
+        //    printf("(/%d)", tokens[i].divider);
+        // else if (tokens[i].has_multiplier)
+        //    printf("(*%d)", tokens[i].multiplier);
+        // else if (tokens[i].has_euclid)
+        //    printf("(%d,%d)", tokens[i].euclid_hits, tokens[i].euclid_steps);
     }
+    printf("EXPANDED PATTERn:\n");
+    print_pattern_tokens(expanded_tokens, expanded_token_idx);
 }
 
 bool parse_pattern(char *line)
@@ -502,12 +586,18 @@ bool parse_pattern(char *line)
         return false;
     }
 
-    pattern_token tokens[MAX_PATTERN] = {0};
+    pattern_token tokens[MAX_PATTERN] = {};
     int token_idx = 0;
 
-    extract_tokens_from_line(tokens, &token_idx, line);
-    printf("I got %d tokens\n", token_idx);
+    int err = 0;
+    if ((err = extract_tokens_from_line(tokens, &token_idx, line)))
+    {
+        printf("Error extracting tokens!\n");
+        return false;
+    }
     print_pattern_tokens(tokens, token_idx);
+
+    expand_the_expanders(tokens, token_idx);
 
     // parse_tokens_into_groups(tokens, token_idx);
 
