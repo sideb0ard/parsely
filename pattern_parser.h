@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 
-#define MAX_PATTERN 128
+#define MAX_PATTERN 256
 #define MAX_PATTERN_CHAR_VAL 100
 #define MAX_CHILDREN 20
 

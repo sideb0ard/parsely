@@ -63,7 +63,7 @@ static void print_pattern_tokens(pattern_token tokens[MAX_PATTERN], int len)
         if (i < (len - 1))
             printf(" ");
         else
-            printf("\n");
+            printf("\n\n");
     }
 }
 
@@ -103,27 +103,36 @@ void parse_tokens_into_groups(pattern_token tokens[MAX_PATTERN], int num_tokens)
 
     print_pattern_tokens(var_tokens, var_tokens_idx);
 
-    // int level = 0;
-    // int start_idx = 0;
-    // int pattern_len = PPBAR;
-    // int ppositions[MAX_PATTERN] = {0};
-    // int numpositions = 0;
-    // work_out_positions(pgroups, level, start_idx, pattern_len, ppositions,
-    //                   &numpositions);
+    int level = 0;
+    int start_idx = 0;
+    int pattern_len = PPBAR;
+    int ppositions[MAX_PATTERN] = {};
+    int numpositions = 0;
+    work_out_positions(pgroups, level, start_idx, pattern_len, ppositions,
+                       &numpositions);
 
-    // int num_uniq = 0;
-    // int uniq_positions[MAX_PATTERN] = {};
-    // for (int i = 0; i < numpositions; i++)
-    //    if (!is_in_array(ppositions[i], uniq_positions, num_uniq))
-    //        uniq_positions[num_uniq++] = ppositions[i];
+    int num_uniq = 0;
+    int uniq_positions[MAX_PATTERN] = {};
+    for (int i = 0; i < numpositions; i++)
+        if (!is_in_array(ppositions[i], uniq_positions, num_uniq))
+            uniq_positions[num_uniq++] = ppositions[i];
 
-    // if (num_uniq != var_tokens_idx)
-    //{
-    //    printf("Vars and timings don't match, ya numpty: num_uniq:%d "
-    //           "var_tokens:%d\n",
-    //           num_uniq, var_tokens_idx);
-    //    return;
-    //}
+    if (num_uniq != var_tokens_idx)
+    {
+        printf("Vars and timings don't match, ya numpty: num_uniq:%d "
+               "var_tokens:%d\n",
+               num_uniq, var_tokens_idx);
+        return;
+    }
+    printf("Num Uniq:%d\n", num_uniq);
+    for (int i = 0; i < num_uniq; i++)
+    {
+        if (var_tokens[i].type == VAR_NAME)
+            printf("%s at pos %d\n", var_tokens[i].value, uniq_positions[i]);
+        else
+            printf("%s at pos %d\n", token_type_names[var_tokens[i].type],
+                   uniq_positions[i]);
+    }
 
     //// 3. verify env vars
     // for (int i = 0; i < var_tokens_idx; i++)
@@ -494,23 +503,22 @@ static void copy_pattern_token(pattern_token *to, pattern_token *from)
     strncpy(to->value, from->value, MAX_PATTERN_CHAR_VAL - 1);
 }
 
-static void expand_the_expanders(pattern_token tokens[MAX_PATTERN], int len)
+static void expand_the_expanders(pattern_token tokens[MAX_PATTERN], int len,
+                                 pattern_token expanded_tokens[MAX_PATTERN],
+                                 int *expanded_tokens_idx)
 {
-    pattern_token expanded_tokens[MAX_PATTERN] = {};
-    int expanded_token_idx = 0;
-
     for (int i = 0; i < len; i++)
     {
         if (tokens[i].type == VAR_NAME)
         {
             if (tokens[i].has_multiplier)
             {
-                expanded_tokens[expanded_token_idx++].type =
+                expanded_tokens[(*expanded_tokens_idx)++].type =
                     SQUARE_BRACKET_LEFT;
                 for (int j = 0; j < tokens[i].multiplier; j++)
-                    copy_pattern_token(&expanded_tokens[expanded_token_idx++],
-                                       &tokens[i]);
-                expanded_tokens[expanded_token_idx++].type =
+                    copy_pattern_token(
+                        &expanded_tokens[(*expanded_tokens_idx)++], &tokens[i]);
+                expanded_tokens[(*expanded_tokens_idx)++].type =
                     SQUARE_BRACKET_RIGHT;
             }
             else if (tokens[i].has_euclid)
@@ -522,7 +530,7 @@ static void expand_the_expanders(pattern_token tokens[MAX_PATTERN], int len)
                     continue;
                 }
 
-                expanded_tokens[expanded_token_idx++].type =
+                expanded_tokens[(*expanded_tokens_idx)++].type =
                     SQUARE_BRACKET_LEFT;
 
                 short euclid = create_euclidean_rhythm(tokens[i].euclid_hits,
@@ -531,23 +539,24 @@ static void expand_the_expanders(pattern_token tokens[MAX_PATTERN], int len)
                 {
                     if (euclid & (1 << (15 - j)))
                         copy_pattern_token(
-                            &expanded_tokens[expanded_token_idx++], &tokens[i]);
+                            &expanded_tokens[(*expanded_tokens_idx)++],
+                            &tokens[i]);
                     else
-                        expanded_tokens[expanded_token_idx++].type = BLANK;
+                        expanded_tokens[(*expanded_tokens_idx)++].type = BLANK;
                 }
-                expanded_tokens[expanded_token_idx++].type =
+                expanded_tokens[(*expanded_tokens_idx)++].type =
                     SQUARE_BRACKET_RIGHT;
             }
             else
-                copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+                copy_pattern_token(&expanded_tokens[(*expanded_tokens_idx)++],
                                    &tokens[i]);
         }
         else if (tokens[i].type == SQUARE_BRACKET_RIGHT)
         {
             if (tokens[i].has_multiplier)
             {
-                printf("RIGHT BRACKEt! wth MULTIPLIERS!\n");
-                print_pattern_tokens(expanded_tokens, expanded_token_idx);
+                // print_pattern_tokens(expanded_tokens,
+                // (*expanded_tokens_idx));
                 // find left bracket
                 // 1. walk backwards comparing for left
                 // if find a right, inc a counter
@@ -559,87 +568,69 @@ static void expand_the_expanders(pattern_token tokens[MAX_PATTERN], int len)
 
                 int multi = tokens[i].multiplier;
 
-                copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+                copy_pattern_token(&expanded_tokens[(*expanded_tokens_idx)++],
                                    &tokens[i]);
 
                 int num_right_brackets_seen = 0;
                 bool found = false;
-                // expanded_token_idx points to one after SQ RIGHT so..
+                // (*expanded_tokens_idx) points to one after SQ RIGHT so..
                 int idx_one_position_before_cur_square_right =
-                    expanded_token_idx - 2;
+                    (*expanded_tokens_idx) - 2;
                 for (int rev_idx = idx_one_position_before_cur_square_right;
                      rev_idx >= 0 && !found; rev_idx--)
                 {
-                    printf("Looking at %s(pos:%d)\n",
-                           token_type_names[expanded_tokens[rev_idx].type],
-                           rev_idx);
                     if (expanded_tokens[rev_idx].type == SQUARE_BRACKET_LEFT)
                     {
-                        printf("FOUND A SQ BRACKET LEFT!\n");
                         if (num_right_brackets_seen > 0)
-                        {
-                            printf("ooh, but it aint mine - there was already "
-                                   "%d waiting brackets\n",
-                                   num_right_brackets_seen);
                             num_right_brackets_seen--;
-                        }
                         else
                         {
-                            printf("FOUND THE LEFT BRACKET as POS:%d Contents "
-                                   "are %d .. %d\n",
-                                   rev_idx, rev_idx + 1,
-                                   idx_one_position_before_cur_square_right);
                             found = true;
                             int num_items =
                                 idx_one_position_before_cur_square_right -
                                 rev_idx;
                             pattern_token temp_tokens[num_items];
 
-
-                            printf("TEMP TOKEN ARRAY SIZE:%d\n", num_items);
                             for (int j = rev_idx + 1, k = 0;
                                  j <= idx_one_position_before_cur_square_right;
                                  j++, k++)
                             {
-                                printf("J:%d\n", j);
                                 copy_pattern_token(&temp_tokens[k],
                                                    &expanded_tokens[j]);
                             }
-                            expanded_token_idx = rev_idx + 1;
+                            (*expanded_tokens_idx) = rev_idx + 1;
                             for (int j = 0; j < multi; j++)
                             {
-                                printf("COPYTIME:j:%d\n",j);
                                 for (int k = 0; k < num_items; k++)
                                 {
-                                    printf("  COPYTIME:k:%d\n",j);
                                     copy_pattern_token(
-                                        &expanded_tokens[expanded_token_idx++],
+                                        &expanded_tokens[(
+                                            *expanded_tokens_idx)++],
                                         &temp_tokens[k]);
                                 }
                             }
-                            expanded_tokens[expanded_token_idx++].type = SQUARE_BRACKET_RIGHT;
+                            expanded_tokens[(*expanded_tokens_idx)++].type =
+                                SQUARE_BRACKET_RIGHT;
                         }
                     }
                     else if (expanded_tokens[rev_idx].type ==
                              SQUARE_BRACKET_RIGHT)
                     {
-                        printf("bugger, another SQ RIGHT\n");
                         num_right_brackets_seen++;
                     }
                 }
-                printf("done\n");
             }
             else
             {
                 // printf("<%s>", tokens[i].value);
-                copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+                copy_pattern_token(&expanded_tokens[(*expanded_tokens_idx)++],
                                    &tokens[i]);
             }
         }
         else
         {
             // printf("%s", token_type_names[tokens[i].type]);
-            copy_pattern_token(&expanded_tokens[expanded_token_idx++],
+            copy_pattern_token(&expanded_tokens[(*expanded_tokens_idx)++],
                                &tokens[i]);
         }
 
@@ -651,7 +642,7 @@ static void expand_the_expanders(pattern_token tokens[MAX_PATTERN], int len)
         //    printf("(%d,%d)", tokens[i].euclid_hits, tokens[i].euclid_steps);
     }
     printf("EXPANDED PATTERn:\n");
-    print_pattern_tokens(expanded_tokens, expanded_token_idx);
+    print_pattern_tokens(expanded_tokens, (*expanded_tokens_idx));
 }
 
 bool parse_pattern(char *line)
@@ -673,9 +664,12 @@ bool parse_pattern(char *line)
     }
     print_pattern_tokens(tokens, token_idx);
 
-    expand_the_expanders(tokens, token_idx);
+    pattern_token expanded_tokens[MAX_PATTERN] = {};
+    int expanded_tokens_idx = 0;
+    expand_the_expanders(tokens, token_idx, expanded_tokens,
+                         &expanded_tokens_idx);
 
-    // parse_tokens_into_groups(tokens, token_idx);
+    parse_tokens_into_groups(expanded_tokens, expanded_tokens_idx);
 
     return true;
 }
